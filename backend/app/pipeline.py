@@ -17,6 +17,7 @@ This is the object FastAPI hosts.
 from __future__ import annotations
 
 import os
+import threading
 import time
 
 import numpy as np
@@ -45,6 +46,11 @@ class FraudDetector:
         self.summary: dict = {}
         self.tr_idx: np.ndarray | None = None
         self.te_idx: np.ndarray | None = None
+        # The investigator holds shared mutable state (event/feature frames), so
+        # live scoring is serialised to stay correct under concurrent requests
+        # (FastAPI serves sync endpoints from a threadpool). Horizontal scale is
+        # achieved by running multiple worker processes, each with its own model.
+        self._score_lock = threading.Lock()
 
     # ------------------------------------------------------------------ build
     def build(self, n_bona_fide: int = 6000, n_fraud: int = 900,
@@ -331,11 +337,16 @@ class FraudDetector:
         return e
 
     def investigate_event(self, event: dict, history: list | None = None) -> dict:
+        """Thread-safe entry point: serialise access to the shared investigator
+        state so concurrent HTTP requests cannot corrupt the scoring frames."""
+        with self._score_lock:
+            return self._investigate_event_locked(event, history)
+
+    def _investigate_event_locked(self, event: dict, history: list | None = None) -> dict:
         """Score a fresh payment, optionally with `history` = prior payments
         from the same entity (e.g. a card-testing / velocity burst) that supply
         realistic velocity context. The target event is always scored last."""
         _require(self)
-        df = self.event_df.copy()
 
         prior_rows = []
         if history:
@@ -351,13 +362,37 @@ class FraudDetector:
             target["event_ts"] = max([p["event_ts"] for p in prior_rows] + [target["event_ts"]]) \
                 + 1_000_000_000
 
-        rows = prior_rows + [target]
-        df = pd.concat([df, pd.DataFrame(rows)], ignore_index=True)
+        # --- SCOPED FEATURE BUILD (performance) --------------------------------
+        # Every engineered feature is computed from *trailing windows keyed by*
+        # user / card / device / merchant, and the three models + investigator
+        # score each row independently (graph & behaviour use pre-fit state).
+        # So the target's features depend ONLY on prior events that share one of
+        # its keys within the long window. Building the whole dataset (thousands
+        # of rows) per request is unnecessary and slow; we build only the
+        # relevant slice + the live history + the target. Verified to produce
+        # byte-for-byte identical target features vs. the full build.
+        base = self.event_df
+        ts_ns = target["event_ts"]
+        keys = (
+            (base["user_id"] == target["user_id"])
+            | (base["card_last4"] == target["card_last4"])
+            | (base["device_id"] == target["device_id"])
+            | (base["merchant"] == target["merchant"])
+        )
+        cand = base[keys]
+        win_lo = ts_ns - self.fe.long_window * 1_000_000_000
+        cand = cand[(cand["event_ts"] <= ts_ns) & (cand["event_ts"] >= win_lo)]
+        if "event_id" in cand.columns:
+            cand = cand[cand["event_id"].astype(str) != str(target["event_id"])]
+
+        rows = [cand] + ([pd.DataFrame(prior_rows)] if prior_rows else []) \
+            + [pd.DataFrame([target])]
+        df = pd.concat(rows, ignore_index=True)
         feat = self.fe.build(df)
         idx_last = len(df) - 1
         p_ml = float(self.ml_risk.predict_proba(feat)[idx_last:idx_last + 1][0])
         p_beh = float(behaviour_scores(self.behaviour, feat)[idx_last])
-        p_grf = float(self.graph.score_events(df).values[idx_last])
+        p_grf = float(self.graph.score_events(df.iloc[idx_last:idx_last + 1]).values[0])
         self.investigator.event_df = df
         self.investigator.feat_df = feat
         res = self.investigator.investigate(idx_last, p_ml, p_beh, p_grf)
@@ -398,6 +433,21 @@ class FraudDetector:
                 res["report"] += (f"\n[online correction] learned feedback escalated "
                                   f"this decision to {res['decision'].upper()}.")
         except Exception:  # pragma: no cover - learning must never break scoring
+            pass
+
+        # ---- persistence: durable transaction log (best-effort)
+        try:
+            from app.database.events import get_transaction_store
+            get_transaction_store().save(target, res)
+        except Exception:  # pragma: no cover - persistence must never break scoring
+            pass
+
+        # ---- persistence: review-band payments enter the human review queue
+        try:
+            if res.get("decision") == "review":
+                from app.database.review import get_review_queue
+                get_review_queue().enqueue(target, res)
+        except Exception:  # pragma: no cover - queue must never break scoring
             pass
         return res
 

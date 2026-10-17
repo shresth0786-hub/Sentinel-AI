@@ -33,15 +33,15 @@ false negatives), not only from the review band.
 
 from __future__ import annotations
 
-import json
-import os
 import threading
 import time
 
 import numpy as np
+from sqlalchemy import func, select
 
-_DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
-_FEEDBACK_FILE = os.path.join(_DATA_DIR, "feedback.json")
+from app.database.db import get_session, init_db
+from app.database.models import FeedbackRecord
+
 
 # ---- sink to allow the dialog to be monkey-patched away in tests ----
 def _log(msg: str) -> None:
@@ -49,77 +49,59 @@ def _log(msg: str) -> None:
 
 
 class FeedbackStore:
-    """Append-only (by event) JSON log of scored transactions + their labels."""
+    """Log of scored transactions + their confirmed labels, persisted in the
+    ``feedback`` table (SQLite locally, PostgreSQL in production)."""
 
-    def __init__(self, path: str = _FEEDBACK_FILE):
-        self._path = path
-        self._lock = threading.Lock()
-        self._data: dict[str, dict] = {}
-        self._load()
-
-    def _load(self) -> None:
-        try:
-            with open(self._path, encoding="utf-8") as f:
-                raw = json.load(f)
-            if isinstance(raw, dict):
-                self._data = raw
-        except (FileNotFoundError, ValueError, OSError):
-            self._data = {}
-
-    def _save(self) -> None:
-        try:
-            os.makedirs(os.path.dirname(self._path), exist_ok=True)
-            with open(self._path, "w", encoding="utf-8") as f:
-                json.dump(self._data, f, indent=2)
-        except OSError:  # pragma: no cover - persistence is best-effort
-            pass
+    def __init__(self, path: str | None = None):  # path kept for backwards-compat
+        init_db()
 
     # ------------------------------------------------------------------ writes
     def record(self, event_id: str, event: dict, features: dict,
                scores: dict, decision: str, corrected_prob: float) -> dict:
         """Register a scored transaction (idempotent by event_id). Existing
         record keeps its label; we refresh the latest scores/decision."""
-        with self._lock:
-            rec = self._data.get(event_id, {})
-            prev_label = rec.get("label")
-            prev_source = rec.get("label_source")
-            rec.update({
-                "event_id": event_id,
-                "event": event,
-                "features": features,
-                "scores": scores,
-                "decision": decision,
-                "p_corrected": round(float(corrected_prob), 4),
-                "created_at": rec.get("created_at", time.time()),
-                "label": prev_label,
-                "label_source": prev_source,
-            })
-            self._data[event_id] = rec
-            self._save()
-            return rec
+        with get_session() as s:
+            rec = s.get(FeedbackRecord, event_id)
+            if rec is None:
+                rec = FeedbackRecord(
+                    event_id=event_id, created_at=time.time(),
+                    label=None, label_source=None,
+                )
+                s.add(rec)
+            rec.event = event
+            rec.features = features
+            rec.scores = scores
+            rec.decision = decision
+            rec.p_corrected = round(float(corrected_prob), 4)
+            s.flush()
+            return rec.to_dict()
 
     def label(self, event_id: str, label: int, source: str,
               corrected: bool = False) -> dict | None:
         """Attach a confirmed label to a previously recorded transaction."""
-        with self._lock:
-            rec = self._data.get(event_id)
+        with get_session() as s:
+            rec = s.get(FeedbackRecord, event_id)
             if rec is None:
                 return None
-            rec["label"] = int(label)
-            rec["label_source"] = source
-            rec["corrected"] = bool(corrected)
-            rec["labelled_at"] = time.time()
-            self._data[event_id] = rec
-            self._save()
-            return rec
+            rec.label = int(label)
+            rec.label_source = source
+            rec.corrected = bool(corrected)
+            rec.labelled_at = time.time()
+            s.flush()
+            return rec.to_dict()
 
     # ------------------------------------------------------------------ reads
     def get(self, event_id: str) -> dict | None:
-        return self._data.get(event_id)
+        with get_session() as s:
+            rec = s.get(FeedbackRecord, event_id)
+            return rec.to_dict() if rec else None
 
     def all(self) -> list[dict]:
-        return [self._data[k] for k in
-                sorted(self._data, key=lambda k: self._data[k].get("created_at", 0))]
+        with get_session() as s:
+            rows = s.execute(
+                select(FeedbackRecord).order_by(FeedbackRecord.created_at.asc())
+            ).scalars().all()
+            return [r.to_dict() for r in rows]
 
     def labelled(self) -> list[dict]:
         return [r for r in self.all() if r.get("label") is not None]
@@ -128,17 +110,26 @@ class FeedbackStore:
         return [r for r in self.all() if r.get("label") is None]
 
     def status(self) -> dict:
-        lab = self.labelled()
-        by_src: dict[str, int] = {}
-        for r in lab:
-            by_src[r.get("label_source") or "unknown"] = by_src.get(
-                r.get("label_source") or "unknown", 0) + 1
+        with get_session() as s:
+            total = int(s.execute(
+                select(func.count()).select_from(FeedbackRecord)).scalar() or 0)
+            labelled = int(s.execute(
+                select(func.count()).select_from(FeedbackRecord)
+                .where(FeedbackRecord.label.is_not(None))).scalar() or 0)
+            corrected = int(s.execute(
+                select(func.count()).select_from(FeedbackRecord)
+                .where(FeedbackRecord.corrected.is_(True))).scalar() or 0)
+            src_rows = s.execute(
+                select(FeedbackRecord.label_source, func.count())
+                .where(FeedbackRecord.label.is_not(None))
+                .group_by(FeedbackRecord.label_source)).all()
+        by_src = {(src or "unknown"): int(c) for src, c in src_rows}
         return {
-            "total_recorded": len(self._data),
-            "labelled": len(lab),
-            "unlabelled": len(self.unlabelled()),
+            "total_recorded": total,
+            "labelled": labelled,
+            "unlabelled": total - labelled,
             "by_source": by_src,
-            "corrected_manual": sum(1 for r in lab if r.get("corrected")),
+            "corrected_manual": corrected,
         }
 
 

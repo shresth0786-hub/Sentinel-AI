@@ -1,0 +1,2163 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Sentinel AI API — Razorpay Fraud Guardian",
+    "description": "\n**Sentinel AI** is a production-grade, defense-only payment-fraud detection and\nexplainability platform for Razorpay-scale payments.\n\nIt turns each payment into a decision through a three-model ensemble plus an\ninvestigator, and never auto-approves a suspicious payment — it escalates to a\nhuman review queue and a phone/OTP verification instead.\n\n### Pipeline\n`payment event -> feature engineering -> ML Risk + Behaviour AI + Graph Engine`\n`-> Investigator ensemble -> decision (approve | review | block) + evidence`\n\n### Persistence & infrastructure\n* **Storage** — SQLAlchemy. SQLite for local/demo, **PostgreSQL** in production\n  (`DATABASE_URL`): users, queries, feedback, transactions, verifications,\n  review queue.\n* **Cache** — OTP/verification sessions live in **Redis** (`REDIS_URL`) with a\n  TTL so secrets expire on their own; falls back to an in-memory store locally.\n* **Human review queue** — review-band payments are enqueued with explainable\n  risk indicators and resolved by an analyst (feeds continual learning).\n* **Phone verification** — OTP over call / SMS / WhatsApp (Twilio optional);\n  simulated fully offline otherwise.\n\n### Auth\nBearer token from `POST /api/auth/login`. Admin-only routes are marked\n`Authorization: Bearer <token>`; a single **admin** role exists.\n",
+    "version": "1.0.0",
+    "contact": {
+      "name": "Sentinel AI — Razorpay AI Buildathon (Track 02)",
+      "url": "https://github.com/shresth0786-hub/Sentinel-AI"
+    },
+    "license": {
+      "name": "MIT"
+    }
+  },
+  "paths": {
+    "/api/health": {
+      "get": {
+        "summary": "Liveness probe.",
+        "operationId": "health_api_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "tags": [
+          "system"
+        ]
+      }
+    },
+    "/api/system": {
+      "get": {
+        "summary": "Report active storage / cache / verification backends.",
+        "description": "Infrastructure self-report: which storage backends are active.",
+        "operationId": "system_info_api_system_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "tags": [
+          "system"
+        ]
+      }
+    },
+    "/api/auth/roles": {
+      "get": {
+        "summary": "List demo accounts + role labels (drives the login page).",
+        "description": "Public: which demo accounts + role labels exist (drives the login page).",
+        "operationId": "auth_roles_api_auth_roles_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/auth/login": {
+      "post": {
+        "summary": "Exchange username/password for a bearer token.",
+        "description": "Verify credentials -> return token + role + display name.",
+        "operationId": "auth_login_api_auth_login_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/auth/me": {
+      "get": {
+        "summary": "Return the current session identity.",
+        "description": "Validate the bearer token and return the current session.",
+        "operationId": "auth_me_api_auth_me_get",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/queries": {
+      "post": {
+        "summary": "Open a new customer-care query (admin).",
+        "description": "Raise a new support ticket to customer care. Persisted to the QUERY\ndatabase (separate from user/payment data).",
+        "operationId": "queries_create_api_queries_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QueryCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "customer-care"
+        ]
+      },
+      "get": {
+        "summary": "List customer-care support queries (admin).",
+        "description": "Full query queue (admin + customer-care only).",
+        "operationId": "queries_list_api_queries_get",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "customer-care"
+        ]
+      }
+    },
+    "/api/queries/stats": {
+      "get": {
+        "summary": "Customer-care query counts by status (admin).",
+        "operationId": "queries_stats_api_queries_stats_get",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "customer-care"
+        ]
+      }
+    },
+    "/api/queries/{query_id}": {
+      "patch": {
+        "summary": "Update a query (status / assignee / resolution) (admin).",
+        "operationId": "queries_update_api_queries__query_id__patch",
+        "parameters": [
+          {
+            "name": "query_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Query Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QueryUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "customer-care"
+        ]
+      }
+    },
+    "/api/summary": {
+      "get": {
+        "summary": "Dataset + model summary with decision metrics.",
+        "operationId": "summary_api_summary_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "tags": [
+          "scoring"
+        ]
+      }
+    },
+    "/api/test-metrics": {
+      "get": {
+        "summary": "Held-out evaluation metrics (precision / recall / AUC, cost).",
+        "description": "Honest held-out test-set metrics: precision/recall/F1 + false-positive cost.",
+        "operationId": "test_metrics_api_test_metrics_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "tags": [
+          "scoring"
+        ]
+      }
+    },
+    "/api/events": {
+      "get": {
+        "summary": "Recent scored payment events (filter by risk).",
+        "operationId": "events_api_events_get",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 2000,
+              "default": 200,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "risk",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^(approve|review|block)$"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Risk"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "scoring"
+        ]
+      }
+    },
+    "/api/events/{event_id}": {
+      "get": {
+        "summary": "Full investigation report + evidence for one event.",
+        "operationId": "event_detail_api_events__event_id__get",
+        "parameters": [
+          {
+            "name": "event_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Event Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "scoring"
+        ]
+      }
+    },
+    "/api/vectors": {
+      "get": {
+        "summary": "Fraud-vector distribution across the dataset.",
+        "operationId": "vectors_api_vectors_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "tags": [
+          "scoring"
+        ]
+      }
+    },
+    "/api/investigate": {
+      "post": {
+        "summary": "Score a live payment (optional velocity history) and return decision + evidence.",
+        "operationId": "investigate_api_investigate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InvestigateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "scoring"
+        ]
+      }
+    },
+    "/api/users": {
+      "get": {
+        "summary": "List stored payer/transaction details (admin).",
+        "description": "Stored user/transaction details for every live-investigated payment.\nADMIN ONLY.",
+        "operationId": "users_list_api_users_get",
+        "parameters": [
+          {
+            "name": "risk",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^(approve|review|block)$"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Risk"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "user-database"
+        ]
+      }
+    },
+    "/api/users/stats": {
+      "get": {
+        "summary": "User-database counts by decision (admin).",
+        "operationId": "users_stats_api_users_stats_get",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "user-database"
+        ]
+      }
+    },
+    "/api/users/search": {
+      "get": {
+        "summary": "Read-only search across the user database.",
+        "description": "SENbot read-only search across the user database (by phone, user id,\nname, card). Available to every authenticated role — but read-only: no\ndelete / integrity here. Admin uses the same endpoint for lookups.",
+        "operationId": "users_search_api_users_search_get",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 256,
+              "default": "",
+              "title": "Q"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "user-database"
+        ]
+      }
+    },
+    "/api/users/{user_id}": {
+      "get": {
+        "summary": "Fetch one stored payer (admin).",
+        "operationId": "users_get_api_users__user_id__get",
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "User Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "user-database"
+        ]
+      },
+      "delete": {
+        "summary": "Admin integrity action: delete a payer + their data.",
+        "description": "ADMIN-ONLY integrity action: permanently remove a payer and ALL of their\nstored data from the dataset + user database.",
+        "operationId": "users_delete_api_users__user_id__delete",
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "User Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "user-database"
+        ]
+      }
+    },
+    "/api/verification": {
+      "get": {
+        "summary": "All phone-verification sessions (active + resolved).",
+        "description": "All phone-call payment-confirmation sessions (active + resolved).",
+        "operationId": "verification_list_api_verification_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "tags": [
+          "verification"
+        ]
+      }
+    },
+    "/api/verification/{verification_id}": {
+      "get": {
+        "summary": "One verification session with call script + state.",
+        "operationId": "verification_get_api_verification__verification_id__get",
+        "parameters": [
+          {
+            "name": "verification_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Verification Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "verification"
+        ]
+      }
+    },
+    "/api/verification/{verification_id}/confirm": {
+      "post": {
+        "summary": "Confirm with the caller's OTP (correct -> approve, wrong x3 -> block).",
+        "description": "Complete the phone call. Correct OTP -> APPROVE. Wrong OTP / cap exceeded\n-> escalate to BLOCK. The payer's ownership confirmation is implicit via the\ncall script.",
+        "operationId": "verification_confirm_api_verification__verification_id__confirm_post",
+        "parameters": [
+          {
+            "name": "verification_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Verification Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OtpRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "verification"
+        ]
+      }
+    },
+    "/api/verification/{verification_id}/deny": {
+      "post": {
+        "summary": "Caller denied ownership -> escalate to block.",
+        "description": "The payer denied making this payment -> escalate to BLOCK.",
+        "operationId": "verification_deny_api_verification__verification_id__deny_post",
+        "parameters": [
+          {
+            "name": "verification_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Verification Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "verification"
+        ]
+      }
+    },
+    "/api/verification/{verification_id}/resend": {
+      "post": {
+        "summary": "Regenerate + re-deliver the OTP.",
+        "description": "Regenerate the OTP and re-place the call.",
+        "operationId": "verification_resend_api_verification__verification_id__resend_post",
+        "parameters": [
+          {
+            "name": "verification_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Verification Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "verification"
+        ]
+      }
+    },
+    "/api/verify/event": {
+      "post": {
+        "summary": "Score an event and return a phone-verification handle when it lands in the review band.",
+        "description": "Score an event and, if it lands on the medium-risk band, return a live\nphone-verification handle ready for OTP confirmation.",
+        "operationId": "verify_event_api_verify_event_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VerifyEventRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "verification"
+        ]
+      }
+    },
+    "/api/review": {
+      "get": {
+        "summary": "List the human review queue (filter by status) with risk indicators.",
+        "description": "Human review queue: review-band payments with explainable risk indicators.\nADMIN ONLY.",
+        "operationId": "review_list_api_review_get",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^(queued|approved|blocked)$"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "review-queue"
+        ]
+      }
+    },
+    "/api/review/stats": {
+      "get": {
+        "summary": "Review-queue counts by status.",
+        "operationId": "review_stats_api_review_stats_get",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "review-queue"
+        ]
+      }
+    },
+    "/api/review/{review_id}/resolve": {
+      "post": {
+        "summary": "Resolve a queued review item (approve | block); feeds continual learning.",
+        "description": "Resolve a queued review-band payment (approve | block). The human verdict\nis fed back into the continual-learning loop. ADMIN ONLY.",
+        "operationId": "review_resolve_api_review__review_id__resolve_post",
+        "parameters": [
+          {
+            "name": "review_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Review Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewResolveRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "review-queue"
+        ]
+      }
+    },
+    "/api/rag/status": {
+      "get": {
+        "summary": "SENbot index + live-source status (admin).",
+        "operationId": "rag_status_api_rag_status_get",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "senbot"
+        ]
+      }
+    },
+    "/api/rag/knowledge": {
+      "get": {
+        "summary": "List the static runbook entries SENbot indexes (admin).",
+        "operationId": "rag_knowledge_api_rag_knowledge_get",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "senbot"
+        ]
+      }
+    },
+    "/api/rag/ask": {
+      "post": {
+        "summary": "Ask SENbot a grounded question over the runbook + live data (admin).",
+        "description": "SENbot Q&A. Answers read-only over the runbook + live dataset, and always\ncarries can_manage=true for the admin.",
+        "operationId": "rag_ask_api_rag_ask_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RagRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "senbot"
+        ]
+      }
+    },
+    "/api/feedback": {
+      "get": {
+        "summary": "Continual-learning feedback store status + records (admin).",
+        "description": "Continual-learning status plus the labelled (and unlabelled) transaction log.",
+        "operationId": "feedback_list_api_feedback_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "tags": [
+          "learning"
+        ]
+      }
+    },
+    "/api/feedback/{event_id}/correct": {
+      "post": {
+        "summary": "Attach a confirmed label / manual correction to a scored event (admin).",
+        "description": "Manually correct the decision for a previously scored transaction.\nFeeds the online corrector immediately and queues it for the next retrain.",
+        "operationId": "feedback_correct_api_feedback__event_id__correct_post",
+        "parameters": [
+          {
+            "name": "event_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Event Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CorrectRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "learning"
+        ]
+      }
+    },
+    "/api/learning/retrain": {
+      "post": {
+        "summary": "Retrain the supervised models on the base data + confirmed feedback (admin).",
+        "description": "Retrain the supervised models (ML Risk + Investigator) on the original\nsynthetic data PLUS all confirmed feedback, then hot-swap the live model.",
+        "operationId": "learning_retrain_api_learning_retrain_post",
+        "parameters": [
+          {
+            "name": "seed",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 42,
+              "title": "Seed"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "learning"
+        ]
+      }
+    },
+    "/api/rzp/status": {
+      "get": {
+        "summary": "Razorpay integration status (keys present?).",
+        "operationId": "rzp_status_api_rzp_status_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "tags": [
+          "razorpay"
+        ]
+      }
+    },
+    "/api/rzp/create-order": {
+      "post": {
+        "summary": "Create a Razorpay test-mode order.",
+        "description": "Create a real Razorpay TEST order (requires rzp_test_ keys).",
+        "operationId": "rzp_create_order_api_rzp_create_order_post",
+        "parameters": [
+          {
+            "name": "amount_inr",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "default": 100.0,
+              "title": "Amount Inr"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "razorpay"
+        ]
+      }
+    },
+    "/api/rzp/webhook": {
+      "post": {
+        "summary": "Ingest a Razorpay payment.captured / order.paid webhook and score it.",
+        "description": "Ingest a real Razorpay 'payment.captured' (or 'order.paid') webhook and\nrun it through the fraud pipeline, returning live decision + evidence.",
+        "operationId": "rzp_webhook_api_rzp_webhook_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "type": "object",
+                "title": "Payload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "razorpay"
+        ]
+      }
+    },
+    "/api/rzp/demo-payment": {
+      "get": {
+        "summary": "Demo card-testing payload for Razorpay test mode.",
+        "description": "A ready-made 'card testing' demo batch for POST /api/investigate\n(see module docstring).",
+        "operationId": "rzp_demo_payment_api_rzp_demo_payment_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "tags": [
+          "razorpay"
+        ]
+      }
+    },
+    "/api/demo/fraud": {
+      "get": {
+        "summary": "Ready-made card-testing burst body for /api/investigate.",
+        "description": "Fraud demo: card-testing burst body for POST /api/investigate.",
+        "operationId": "demo_fraud_api_demo_fraud_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "tags": [
+          "scoring"
+        ]
+      }
+    },
+    "/api/demo/clean": {
+      "get": {
+        "summary": "Ready-made benign payment body for /api/investigate.",
+        "description": "Clean demo: benign established-customer payment body for /api/investigate.",
+        "operationId": "demo_clean_api_demo_clean_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "tags": [
+          "scoring"
+        ]
+      }
+    },
+    "/": {
+      "get": {
+        "summary": " Serve Root",
+        "operationId": "_serve_root__get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "tags": [
+          "misc"
+        ]
+      }
+    },
+    "/{path}": {
+      "get": {
+        "summary": " Serve Spa",
+        "operationId": "_serve_spa__path__get",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Path"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "misc"
+        ]
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "CorrectRequest": {
+        "properties": {
+          "is_fraud": {
+            "type": "boolean",
+            "title": "Is Fraud",
+            "description": "true verdict for this transaction"
+          }
+        },
+        "type": "object",
+        "required": [
+          "is_fraud"
+        ],
+        "title": "CorrectRequest"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "InvestigateRequest": {
+        "properties": {
+          "event": {
+            "$ref": "#/components/schemas/PaymentEvent"
+          },
+          "history": {
+            "items": {
+              "$ref": "#/components/schemas/PaymentEvent"
+            },
+            "type": "array",
+            "title": "History",
+            "description": "optional prior payments from the same entity that supply velocity/behaviour context (card-testing / burst demo)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "event"
+        ],
+        "title": "InvestigateRequest"
+      },
+      "LoginRequest": {
+        "properties": {
+          "username": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Username"
+          },
+          "password": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Password"
+          }
+        },
+        "type": "object",
+        "required": [
+          "username",
+          "password"
+        ],
+        "title": "LoginRequest"
+      },
+      "OtpRequest": {
+        "properties": {
+          "otp": {
+            "type": "string",
+            "maxLength": 12,
+            "minLength": 1,
+            "title": "Otp",
+            "description": "one-time passcode the payer read back over the phone"
+          }
+        },
+        "type": "object",
+        "required": [
+          "otp"
+        ],
+        "title": "OtpRequest"
+      },
+      "PaymentEvent": {
+        "properties": {
+          "user_id": {
+            "type": "string",
+            "title": "User Id",
+            "description": "payer identifier"
+          },
+          "device_id": {
+            "type": "string",
+            "title": "Device Id",
+            "description": "device fingerprint",
+            "default": ""
+          },
+          "card_last4": {
+            "type": "string",
+            "title": "Card Last4",
+            "description": "last 4 digits of the card",
+            "default": "0000"
+          },
+          "amount_inr": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Amount Inr"
+          },
+          "merchant": {
+            "type": "string",
+            "title": "Merchant",
+            "default": "Unknown Store"
+          },
+          "payment_method": {
+            "type": "string",
+            "title": "Payment Method",
+            "default": "card"
+          },
+          "card_bin_country": {
+            "type": "string",
+            "title": "Card Bin Country",
+            "default": "IN"
+          },
+          "ip_geo_match": {
+            "type": "boolean",
+            "title": "Ip Geo Match",
+            "default": true
+          },
+          "is_international": {
+            "type": "boolean",
+            "title": "Is International",
+            "default": false
+          },
+          "billing_zip": {
+            "type": "string",
+            "title": "Billing Zip",
+            "default": "400001"
+          },
+          "shipping_zip": {
+            "type": "string",
+            "title": "Shipping Zip",
+            "default": "400001"
+          },
+          "typing_seconds": {
+            "type": "number",
+            "title": "Typing Seconds",
+            "default": 15.0
+          },
+          "attempt_count": {
+            "type": "integer",
+            "title": "Attempt Count",
+            "default": 1
+          },
+          "is_new_device": {
+            "type": "boolean",
+            "title": "Is New Device",
+            "default": false
+          },
+          "three_ds_passed": {
+            "type": "boolean",
+            "title": "Three Ds Passed",
+            "default": true
+          },
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "default": "captured"
+          },
+          "phone": {
+            "type": "string",
+            "title": "Phone",
+            "default": ""
+          },
+          "channel": {
+            "type": "string",
+            "title": "Channel",
+            "description": "OTP delivery channel for the review band: call | sms | whatsapp (used with Twilio)",
+            "default": "call"
+          }
+        },
+        "type": "object",
+        "required": [
+          "user_id",
+          "amount_inr"
+        ],
+        "title": "PaymentEvent"
+      },
+      "QueryCreate": {
+        "properties": {
+          "author": {
+            "type": "string",
+            "maxLength": 128,
+            "title": "Author",
+            "default": ""
+          },
+          "contact": {
+            "type": "string",
+            "maxLength": 256,
+            "title": "Contact",
+            "default": ""
+          },
+          "category": {
+            "type": "string",
+            "maxLength": 32,
+            "title": "Category",
+            "default": "other"
+          },
+          "message": {
+            "type": "string",
+            "maxLength": 4000,
+            "minLength": 1,
+            "title": "Message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "message"
+        ],
+        "title": "QueryCreate"
+      },
+      "QueryUpdate": {
+        "properties": {
+          "status": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 16
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          },
+          "assigned_to": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assigned To"
+          },
+          "resolution": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 4000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolution"
+          }
+        },
+        "type": "object",
+        "title": "QueryUpdate"
+      },
+      "RagRequest": {
+        "properties": {
+          "question": {
+            "type": "string",
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Question"
+          }
+        },
+        "type": "object",
+        "required": [
+          "question"
+        ],
+        "title": "RagRequest"
+      },
+      "ReviewResolveRequest": {
+        "properties": {
+          "action": {
+            "type": "string",
+            "pattern": "^(approve|block)$",
+            "title": "Action",
+            "description": "human verdict for a queued review-band payment"
+          },
+          "resolution": {
+            "type": "string",
+            "maxLength": 512,
+            "title": "Resolution",
+            "description": "optional analyst note",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "action"
+        ],
+        "title": "ReviewResolveRequest"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      },
+      "VerifyEventRequest": {
+        "properties": {
+          "event": {
+            "$ref": "#/components/schemas/PaymentEvent"
+          }
+        },
+        "type": "object",
+        "required": [
+          "event"
+        ],
+        "title": "VerifyEventRequest"
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "system",
+      "description": "Health, infrastructure self-report and demo fixtures."
+    },
+    {
+      "name": "auth",
+      "description": "Login and session identity."
+    },
+    {
+      "name": "scoring",
+      "description": "Payment ingestion, model summary, live investigation and evidence."
+    },
+    {
+      "name": "review-queue",
+      "description": "Human review queue for medium-risk (review-band) payments with explainable indicators."
+    },
+    {
+      "name": "verification",
+      "description": "Phone-call / OTP payment confirmation (call, SMS, WhatsApp)."
+    },
+    {
+      "name": "user-database",
+      "description": "Persisted payer / transaction details (admin integrity: search + delete)."
+    },
+    {
+      "name": "customer-care",
+      "description": "Customer-care support query store."
+    },
+    {
+      "name": "learning",
+      "description": "Continual-learning feedback and on-demand retrain."
+    },
+    {
+      "name": "senbot",
+      "description": "SENbot — the grounded admin assistant over the runbook + live data."
+    },
+    {
+      "name": "razorpay",
+      "description": "Razorpay test-mode integration: orders + webhook ingestion."
+    }
+  ],
+  "servers": [
+    {
+      "url": "/",
+      "description": "current server"
+    }
+  ]
+}

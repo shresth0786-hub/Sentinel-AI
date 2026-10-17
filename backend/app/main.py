@@ -34,10 +34,22 @@ from app.pipeline import FraudDetector
 from app import razorpay_client
 from app.verification import verifier
 from app.auth import create_token, get_current_user, require_role, list_roles
+from app.database import db_backend, init_db
+from app import api_docs
 
 _ARTIFACT_DIR = os.path.join(os.path.dirname(__file__), "..", "artifacts")
 
-app = FastAPI(title="Sentinel AI API — Razorpay Fraud Guardian", version="1.0.0")
+# Create all tables (users, queries, feedback, transactions, verifications,
+# review_queue) at startup. SQLite by default, PostgreSQL via DATABASE_URL.
+init_db()
+
+app = FastAPI(
+    title=api_docs.TITLE,
+    version=api_docs.VERSION,
+    description=api_docs.DESCRIPTION,
+    openapi_tags=api_docs.TAGS,
+)
+api_docs.install(app)
 
 # ------------------------------------------------------------------ CORS
 # In production, restrict this to your dashboard origin(s) via SENTINEL_CORS_ORIGINS
@@ -102,6 +114,23 @@ class InvestigateRequest(BaseModel):
 @app.get("/api/health")
 def health():
     return {"status": "ok", "service": "razorpay-fraud-guardian"}
+
+
+@app.get("/api/system")
+def system_info():
+    """Infrastructure self-report: which storage backends are active."""
+    from app.cache import cache_backend
+    from app.database.events import get_transaction_store
+    try:
+        tx = get_transaction_store().count()
+    except Exception:  # pragma: no cover
+        tx = None
+    return {
+        "storage": db_backend(),
+        "cache": cache_backend(),
+        "verification_mode": verifier().mode(),
+        "transactions_persisted": tx,
+    }
 
 
 # ------------------------------------------------ auth / roles
@@ -383,6 +412,48 @@ def verify_event(req: VerifyEventRequest):
         return res
     except Exception as exc:  # pragma: no cover
         raise HTTPException(500, f"verification setup failed: {exc}") from exc
+
+
+# ---------------------------------------------------------------- review queue
+class ReviewResolveRequest(BaseModel):
+    action: str = Field(..., pattern="^(approve|block)$",
+                        description="human verdict for a queued review-band payment")
+    resolution: str = Field("", max_length=512,
+                            description="optional analyst note")
+
+
+@app.get("/api/review")
+def review_list(user=Depends(require_role("admin")),
+                status: Optional[str] = Query(None, pattern="^(queued|approved|blocked)$")):
+    """Human review queue: review-band payments with explainable risk indicators.
+    ADMIN ONLY."""
+    from app.database.review import get_review_queue
+    q = get_review_queue()
+    return {"reviews": q.all(status), "stats": q.stats()}
+
+
+@app.get("/api/review/stats")
+def review_stats(user=Depends(require_role("admin"))):
+    from app.database.review import get_review_queue
+    return get_review_queue().stats()
+
+
+@app.post("/api/review/{review_id}/resolve")
+def review_resolve(review_id: str, body: ReviewResolveRequest,
+                   user=Depends(require_role("admin"))):
+    """Resolve a queued review-band payment (approve | block). The human verdict
+    is fed back into the continual-learning loop. ADMIN ONLY."""
+    from app.database.review import get_review_queue
+    try:
+        rec = get_review_queue().resolve(
+            review_id, body.action,
+            reviewer=(user or {}).get("username", "admin"),
+            resolution=body.resolution)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    if rec is None:
+        raise HTTPException(404, "review item not found")
+    return rec
 
 
 # ------------------------------------------------------------------ SENbot (admin assistant)

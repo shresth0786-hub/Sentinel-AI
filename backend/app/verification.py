@@ -23,6 +23,13 @@ The phone call itself can be one of two modes, chosen automatically:
     (or an SMS) that delivers the OTP to the payer's phone. Falls back to
     simulation if any part is missing. NEVER commit real keys.
 
+Persistence (production-grade):
+  * The **live OTP session** is held in the shared cache — Redis when
+    ``REDIS_URL`` is set, else an in-memory store — with a TTL, so the secret
+    expires on its own and is never written to the relational database.
+  * The **audit trail** (the "recorded call" log) is mirrored to the
+    ``verifications`` table so it survives restarts and feeds the dashboard/RAG.
+
 Criteria to confirm the payer is legitimate (all must hold to APPROVE):
   1. The payer supplies the correct OTP that was sent to their phone.
   2. The payer confirms ownership of the payment (the call script asks them to
@@ -33,10 +40,12 @@ Criteria to confirm the payer is legitimate (all must hold to APPROVE):
 
 from __future__ import annotations
 
-import json
 import os
 import time
 import uuid
+
+from app.cache import get_session_cache
+from app.database.verifications import verification_audit
 
 # --- optional real telephony (lazy import so the demo runs without twilio) ----
 try:  # pragma: no cover - only present if the optional package is installed
@@ -49,7 +58,9 @@ except Exception:  # noqa: BLE001
 _MAX_ATTEMPTS = 3            # wrong OTP attempts before we escalate to BLOCK
 _OTP_TTL_SECONDS = 300       # OTP expires after 5 minutes
 _OTP_POOL = "0123456789"
-_RECORD_FILE = os.path.join(os.path.dirname(__file__), "..", "data", "verifications.json")
+# Give the cache session a little longer than the OTP window so an expired
+# session can still be read back and reported as 'expired' (not 'unknown').
+_CACHE_TTL_GRACE = 60
 
 # Verification channels the payer can be reached on to confirm the OTP.
 CHANNELS = ("call", "sms", "whatsapp")
@@ -66,40 +77,35 @@ def _generate_otp(length: int = 6) -> str:
 
 
 class PhoneVerifier:
-    """In-memory store of payment verification sessions + simulated/real calls.
+    """Store of payment verification sessions + simulated/real calls.
 
-    A single process holds these; for a multi-worker deployment this would be
-    backed by Redis/DB. For the buildathon demo an in-memory dict is enough.
+    The live session (with the OTP) lives in the shared cache with a TTL; the
+    audit trail is mirrored to the database so the call log is durable and
+    visible across restarts and multiple workers.
     """
 
     def __init__(self, max_attempts: int = _MAX_ATTEMPTS,
                  otp_ttl: int = _OTP_TTL_SECONDS):
         self.max_attempts = max_attempts
         self.otp_ttl = otp_ttl
-        self._store: dict[str, dict] = {}
-        self._load()
+        self._cache = get_session_cache()
+        self._audit = verification_audit()
 
-    # -------------------------------------------------- persistent call record
-    def _load(self) -> None:
-        """Restore previously 'recorded' verification sessions from disk so the
-        call log survives a backend restart (best-effort; missing/corrupt file
-        simply means an empty log)."""
+    # ------------------------------------------------------------- persistence
+    def _persist(self, ver: dict) -> None:
+        """Write the live session to the cache (TTL) and mirror the audit row."""
+        self._cache.set(ver["verification_id"], ver, ttl=self.otp_ttl + _CACHE_TTL_GRACE)
         try:
-            with open(_RECORD_FILE, encoding="utf-8") as f:
-                data = json.load(f)
-            if isinstance(data, dict):
-                self._store = data
-        except (FileNotFoundError, ValueError, OSError):
-            self._store = {}
-
-    def _save(self) -> None:
-        """Persist every session (the 'recorded call' log) to append-only JSON."""
-        try:
-            os.makedirs(os.path.dirname(_RECORD_FILE), exist_ok=True)
-            with open(_RECORD_FILE, "w", encoding="utf-8") as f:
-                json.dump(self._store, f, indent=2)
-        except OSError:  # pragma: no cover - persistence is best-effort
+            self._audit.save(ver)
+        except Exception:  # pragma: no cover - audit must not break the call
             pass
+
+    def _load(self, vid: str) -> dict | None:
+        """Live session from cache, else the durable audit row."""
+        ver = self._cache.get(vid)
+        if ver is not None:
+            return ver
+        return self._audit.get(vid)
 
     # ------------------------------------------------------------- env/status
     @staticmethod
@@ -114,12 +120,17 @@ class PhoneVerifier:
         return "simulated"
 
     def status(self) -> dict:
+        try:
+            sessions = self.list()
+        except Exception:  # pragma: no cover
+            sessions = []
         return {
             "mode": self.mode(),
             "twilio_installed": _TWILIO_AVAILABLE,
             "channels": list(CHANNELS),
-            "active": sum(1 for v in self._store.values()
-                          if v["status"] in ("pending", "in_call")),
+            "cache_backend": self._cache.backend,
+            "active": sum(1 for v in sessions
+                          if v.get("status") in ("pending", "in_call")),
         }
 
     # ------------------------------------------------------------------ create
@@ -151,10 +162,9 @@ class PhoneVerifier:
             "created_at": now,
             "call_script": self._build_call_script(event, otp, channel),
         }
-        self._store[vid] = ver
         self._deliver(ver)
         ver["status"] = "pending"                # awaiting OTP confirmation
-        self._save()
+        self._persist(ver)
         return self._public(ver)
 
     def _deliver(self, ver: dict) -> None:
@@ -233,7 +243,7 @@ class PhoneVerifier:
     def confirm(self, verification_id: str, otp: str) -> dict:
         """Complete the call. Correct OTP + ownership confirmation -> approve;
         wrong OTP / cap exceeded -> block (escalated)."""
-        ver = self._store.get(verification_id)
+        ver = self._load(verification_id)
         if ver is None:
             raise KeyError(f"Unknown verification: {verification_id}")
 
@@ -242,10 +252,11 @@ class PhoneVerifier:
 
         if time.time() > ver["otp_expires_at"]:
             ver["status"] = "expired"
+            self._persist(ver)
             return self._public(ver)
 
-        ver["attempts"] += 1
-        if otp == ver["otp"]:
+        ver["attempts"] = int(ver.get("attempts", 0)) + 1
+        if otp and otp == ver.get("otp"):
             ver["status"] = "approved"
             ver["resolved_at"] = time.time()
             ver["final_action"] = "approve"
@@ -259,12 +270,12 @@ class PhoneVerifier:
                 self._feed_label(ver, 1, "otp_deny")
             else:
                 ver["status"] = "pending"       # allow a retry
-        self._save()
+        self._persist(ver)
         return self._public(ver)
 
     def deny(self, verification_id: str) -> dict:
         """The caller denied ownership of the payment -> escalate to BLOCK."""
-        ver = self._store.get(verification_id)
+        ver = self._load(verification_id)
         if ver is None:
             raise KeyError(f"Unknown verification: {verification_id}")
         if ver["status"] == "pending":
@@ -273,12 +284,12 @@ class PhoneVerifier:
             ver["final_action"] = "block"
             ver["resolved_at"] = time.time()
             self._feed_label(ver, 1, "otp_deny")
-        self._save()
+            self._persist(ver)
         return self._public(ver)
 
     def resend(self, verification_id: str) -> dict:
         """Regenerate a fresh OTP and re-deliver it over the same channel."""
-        ver = self._store.get(verification_id)
+        ver = self._load(verification_id)
         if ver is None:
             raise KeyError(f"Unknown verification: {verification_id}")
         ver["otp"] = _generate_otp()
@@ -289,18 +300,31 @@ class PhoneVerifier:
             ver["otp"], ver.get("channel", "call"))
         ver["status"] = "pending"
         self._deliver(ver)
-        self._save()
+        self._persist(ver)
         return self._public(ver)
 
     def get(self, verification_id: str) -> dict:
-        ver = self._store.get(verification_id)
+        ver = self._load(verification_id)
         if ver is None:
             raise KeyError(f"Unknown verification: {verification_id}")
         return self._public(ver)
 
     def list(self) -> list[dict]:
-        return [self._public(v) for v in
-                sorted(self._store.values(), key=lambda v: v["created_at"], reverse=True)]
+        """Merge active (cached, OTP-bearing) sessions over the durable audit
+        log so the dashboard sees live OTPs for pending calls and full history
+        after they resolve."""
+        rows = self._audit.all()
+        by_id = {r["verification_id"]: r for r in rows}
+        try:
+            for vid in self._cache.keys():
+                live = self._cache.get(vid)
+                if live:
+                    by_id[vid] = live
+        except Exception:  # pragma: no cover - cache listing best-effort
+            pass
+        merged = sorted(by_id.values(), key=lambda v: v.get("created_at", 0),
+                        reverse=True)
+        return [self._public(v) for v in merged]
 
     # ------------------------------------------------------------------ util
     @staticmethod
