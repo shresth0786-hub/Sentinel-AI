@@ -1,23 +1,68 @@
 # =============================================================
-# Sentinel AI — Docker Compose (hardened demo/deploy)
+# Sentinel AI — Docker Compose (hardened demo/deploy stack)
 #
-# * Runs the single-container image (API + built dashboard).
+# * sentinel-ai : API + built dashboard (single container, non-root, read-only)
+# * db          : PostgreSQL 16 — durable store for users, queries, feedback,
+#                 verifications, transactions and the human review queue
+# * redis       : Redis 7 — OTP / verification session store (fast, expiring)
+#
 # * Container root filesystem is READ-ONLY; only runtime-data volumes are writable.
 # * NO secrets in this file. Secrets (auth secret, admin password, Twilio /
-#   Razorpay keys) are injected at runtime from the environment / a secret
-#   manager — e.g. `docker compose --env-file .env.prod up -d` or your
-#   orchestrator's secret store.
+#   Razorpay keys, and the Postgres password) are injected at runtime from the
+#   environment / a secret manager — e.g. `docker compose --env-file .env.prod up -d`
+#   or your orchestrator's secret store.
 #
 #   docker compose up --build -d
 #   open http://localhost:8100
 # =============================================================
 
 services:
+  # ---------------------------------------------------------------- database
+  db:
+    image: postgres:16-alpine
+    container_name: sentinel-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: "${POSTGRES_DB:-sentinel}"
+      POSTGRES_USER: "${POSTGRES_USER:-sentinel}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD via your secret manager}"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-sentinel} -d ${POSTGRES_DB:-sentinel}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ---------------------------------------------------------------- cache
+  redis:
+    image: redis:7-alpine
+    container_name: sentinel-redis
+    restart: unless-stopped
+    # Persist AOF so in-flight OTP sessions survive a restart; still TTL-bounded.
+    command: ["redis-server", "--appendonly", "yes", "--save", "60", "1"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+  # ---------------------------------------------------------------- app
   sentinel-ai:
     build: .
     image: sentinel-ai:latest
     container_name: sentinel-ai
     restart: unless-stopped
+
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
 
     ports:
       - "8100:8100"
@@ -31,17 +76,21 @@ services:
       - ALL
 
     volumes:
-      # Sole writable paths — persistent runtime data (users, queries, feedback,
-      # verifications, uploaded datasets). Never stored in the image.
+      # Sole writable paths — persistent runtime data (feedback, verifications,
+      # datasets). Never stored in the image. The Postgres-backed app does not
+      # need the SQLite fallback, but it is kept for a graceful DB-less start.
       - sentinel_data:/app/backend/data
-      - sentinel_db:/app/backend/app/database/db
+      - sentinel_db:/app/backend/database
 
     # Runtime secrets are NEVER inline here. Pass them from the environment /
     # secret manager. Override CORS origins and enable strict key checking:
     environment:
       SENTINEL_STRICT: "1"
       SENTINEL_CORS_ORIGINS: "${SENTINEL_CORS_ORIGINS:-http://localhost:8100}"
-      # Passed through from the host env / secret manager — do not hardcode:
+      # ---- persistence + cache wiring (points at the services above) ----
+      DATABASE_URL: "postgresql+psycopg2://${POSTGRES_USER:-sentinel}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD via your secret manager}@db:5432/${POSTGRES_DB:-sentinel}"
+      REDIS_URL: "redis://redis:6379/0"
+      # ---- secrets passed through from the host env / secret manager ----
       #   SENTINEL_AUTH_SECRET
       #   SENTINEL_ADMIN_PASSWORD
       #   SENTINEL_REDACT_OTP=1
@@ -57,5 +106,7 @@ services:
       RAZORPAY_KEY_SECRET: "${RAZORPAY_KEY_SECRET:-}"
 
 volumes:
-  sentinel_data:      # feedback.json, verifications.json, users.json
-  sentinel_db:        # users.json, queries.json (user_db / query_db)
+  sentinel_data:      # feedback, verifications, datasets (runtime)
+  sentinel_db:        # SQLite fallback DB (unused when DATABASE_URL points at Postgres)
+  pgdata:             # PostgreSQL data directory
+  redis_data:         # Redis AOF/RDB data

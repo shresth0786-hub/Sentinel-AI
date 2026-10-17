@@ -57,7 +57,7 @@ COPY --from=frontend-build /app/frontend/dist ./frontend/app/dist
 # Runtime dirs. Their CONTENTS (users, queries, feedback, verifications,
 # uploaded datasets) are NOT stored here — they mount onto persistent volumes.
 # Create them writable only for the app user.
-RUN mkdir -p backend/data backend/database/db backend/app/database/db \
+RUN mkdir -p backend/data backend/database backend/app/database/db \
     && chown -R appuser:appuser /app
 
 # Train model artifacts inside the image (static, read-only model version).

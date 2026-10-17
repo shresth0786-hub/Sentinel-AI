@@ -180,24 +180,28 @@ Open **http://localhost:5173** for the dashboard (Vite proxies `/api` to `:8100`
 On Windows you can also run `powershell -ExecutionPolicy Bypass -File start.ps1`
 to launch both at once.
 
-### Option B — Docker (single container, hardened)
+### Option B — Docker (hardened stack: app + PostgreSQL + Redis)
 
 Build and run in one step — no local Node or Python setup needed beyond Docker.
-The image is **hardened**: it runs as a non-root user on a read-only root
-filesystem, drops all capabilities, and stores **no data or secrets** in the
-image (see [SECURITY.md](SECURITY.md)).
+`docker compose` brings up **three** services: the **app** (API + built
+dashboard), **PostgreSQL** (durable store for users, queries, feedback,
+verifications, transactions and the human review queue) and **Redis** (OTP /
+verification session store). The app image is **hardened**: it runs as a
+non-root user on a read-only root filesystem, drops all capabilities, and
+stores **no data or secrets** in the image (see [SECURITY.md](SECURITY.md)).
 
 ```bash
 # Provide runtime secrets from the environment / secret manager
 export SENTINEL_AUTH_SECRET="$(openssl rand -hex 32)"
 export SENTINEL_ADMIN_PASSWORD='a-strong-admin-password'
-docker compose up --build -d      # recommended (persistent volumes + hardened)
+export POSTGRES_PASSWORD='a-strong-db-password'
+docker compose up --build -d      # recommended (Postgres + Redis + volumes)
 docker compose down               # stop (data is kept in volumes)
 ```
 
-> The compose file requires `SENTINEL_AUTH_SECRET` and
-> `SENTINEL_ADMIN_PASSWORD` (they are never hardcoded). Set them as above or
-> via your secret manager. Without them `docker compose up` refuses to start.
+> The compose file requires `SENTINEL_AUTH_SECRET`, `SENTINEL_ADMIN_PASSWORD` and
+> `POSTGRES_PASSWORD` (they are never hardcoded). Set them as above or via your
+> secret manager. Without them `docker compose up` refuses to start.
 
 Open **http://localhost:8100** — the built React dashboard and the FastAPI API
 are both served from the same container.
@@ -206,29 +210,26 @@ are both served from the same container.
 > with Vite, and trains the model). Subsequent builds are fast thanks to layer
 > caching.
 
-**Runtime data lives on persistent volumes, not in the image.** All
-user-generated state — new/uploaded datasets, investigated users,
-customer-care queries, feedback labels, and OTP verification log — is written
-to `/app/backend/data` and `/app/backend/app/database/db` in the container.
-`docker-compose.yml` mounts these as named volumes (`sentinel_data`,
-`sentinel_db`) so they survive container restarts and rebuilds. With plain
-`docker run`, mount them explicitly and pass secrets to keep the same
-behaviour:
+**Persistence & cache wiring.** `docker-compose.yml` points the app at the two
+backing services via env vars — no code change needed:
 
-```bash
-docker run -p 8100:8100 \
-  -e SENTINEL_AUTH_SECRET="$(openssl rand -hex 32)" \
-  -e SENTINEL_ADMIN_PASSWORD='a-strong-admin-password' \
-  -e SENTINEL_REDACT_OTP=1 \
-  -v sentinel_data:/app/backend/data \
-  -v sentinel_db:/app/backend/app/database/db \
-  --user 10001:10001 --read-only \
-  sentinel-ai
-```
+- `DATABASE_URL=postgresql+psycopg2://…@db:5432/sentinel` → PostgreSQL.
+- `REDIS_URL=redis://redis:6379/0` → Redis (shared, TTL-bounded OTP sessions).
+
+**Runtime data lives on persistent volumes, not in the image.** New/uploaded
+datasets, investigated users, customer-care queries, feedback labels, OTP
+verification log, transactions and the review queue live in PostgreSQL (volume
+`pgdata`); OTP sessions live in Redis (volume `redis_data`). `docker-compose.yml`
+mounts `sentinel_data`, `sentinel_db` (SQLite fallback), `pgdata` and
+`redis_data` so state survives restarts and rebuilds.
+
+Without Docker you can still run the app locally against **SQLite + in-memory**
+(no servers needed) — that is the default when `DATABASE_URL` / `REDIS_URL` are
+unset. To use your own PostgreSQL/Redis, just set those two env vars.
 
 Nothing is baked into the Dockerfile except static model artifacts (the approved
 model version, trained at build time) and code — all runtime writes go to
-volumes, and all secrets are injected at runtime.
+volumes/databases, and all secrets are injected at runtime.
 
 For the full hardening runbook (secrets, auth, CORS, OTP, container
 privileges, supply chain), see **[SECURITY.md](SECURITY.md)**.
@@ -238,6 +239,8 @@ privileges, supply chain), see **[SECURITY.md](SECURITY.md)**.
 ## Tech stack
 
 - **Backend:** FastAPI, Python, XGBoost, scikit-learn
+- **Persistence:** SQLAlchemy — PostgreSQL (production) / SQLite (default), Redis
+  for OTP sessions (in-memory fallback)
 - **Frontend:** React + Vite + Recharts
 - **Extras:** offline TF-IDF RAG (SENbot), simulated Twilio phone / SMS / WhatsApp
   verification (real Twilio supported via env keys)
@@ -251,7 +254,7 @@ razorpay-fraud-detector/
 ├── backend/
 │   ├── app/
 │   │   ├── data_generator.py      # Razorpay-style events (9 fraud vectors)
-│   │   ├── features.py            # leak-safe feature engineering (50 features)
+│   │   ├── features.py            # leak-safe feature engineering (per-key windows)
 │   │   ├── models/
 │   │   │   ├── ml_risk.py         # supervised risk scorer (XGBoost)
 │   │   │   ├── behaviour_ai.py    # anomaly autoencoder
@@ -259,16 +262,29 @@ razorpay-fraud-detector/
 │   │   ├── investigator.py        # ensemble + evidence
 │   │   ├── verification.py        # phone / SMS / WhatsApp OTP verification
 │   │   ├── feedback.py            # continual learning
+│   │   ├── cache.py               # OTP session store (Redis + memory fallback)
+│   │   ├── database/              # persistence layer (SQLite / PostgreSQL)
+│   │   │   ├── db.py              #   engine/session/init_db (DATABASE_URL)
+│   │   │   ├── models.py          #   ORM: users, queries, feedback, verifications,
+│   │   │   │                      #        transactions, review_queue
+│   │   │   ├── user_db.py         #   user / payer database
+│   │   │   ├── query_db.py        #   customer-care query database
+│   │   │   ├── events.py          #   persisted scored transactions
+│   │   │   ├── verifications.py   #   verification / OTP audit log
+│   │   │   └── review.py          #   human review queue
+│   │   ├── api_docs.py            # curated OpenAPI / Swagger metadata
 │   │   ├── rag/                   # SENbot — admin Q&A (offline RAG)
 │   │   │   ├── rag_knowledge.py   #   static "issues & remedies" runbook
 │   │   │   ├── rag.py             #   TF-IDF retrieval + grounded answering
 │   │   │   └── rag_pipeline.py    #   orchestration, feeds live DB context
-│   │   ├── database/              # persisted stores (users.json, queries.json)
-│   │   │   ├── user_db.py         #   user / payer database
-│   │   │   └── query_db.py        #   customer-care query database
 │   │   └── main.py                # FastAPI + serves built dashboard (SPA)
+│   ├── tests/                     # pytest suite (unit + API integration)
+│   ├── conftest.py, pytest.ini    # test fixtures / config
+│   ├── load_test.py               # latency/throughput harness -> docs/PERFORMANCE.md
+│   ├── export_openapi.py          # writes docs/openapi.json + docs/API.md
 │   ├── train.py                   # train + save artifacts
 │   └── requirements.txt
+├── docs/                          # openapi.json, API.md, PERFORMANCE.md
 ├── frontend/
 │   └── app/                       # React (Vite) dashboard
 │       └── src/
@@ -279,8 +295,8 @@ razorpay-fraud-detector/
 │               ├── AdminRagPanel.jsx   # SENbot Q&A panel
 │               ├── UserDatabasePanel.jsx  # investigated users + deletion
 │               └── ...               # other dashboard panels
-├── Dockerfile                     # single-container multi-stage build
-├── docker-compose.yml             # one-command run + persistent data volumes
+├── Dockerfile                     # multi-stage build (frontend + API)
+├── docker-compose.yml             # app + PostgreSQL + Redis (hardened)
 ├── .dockerignore                  # keeps Docker image clean
 ├── .gitignore
 ├── start.ps1                      # launch both (Windows)
@@ -291,24 +307,63 @@ razorpay-fraud-detector/
 
 ## API endpoints
 
+Auth (`/api/auth`: login, me, roles), health (`/api/health`), status
+(`/api/system`), scoring (`/api/summary`, `/api/events`, `/api/investigate`,
+`/api/vectors`, `/api/test-metrics`), demo shortcuts (`/api/demo/clean|fraud`),
+phone/OTP verification (`/api/verify/event`, `/api/verification…`), the human
+review queue (`/api/review…`), continual learning (`/api/feedback…`,
+`/api/learning/retrain`), users (`/api/users…`), customer-care queries
+(`/api/queries…`), SENbot RAG (`/api/rag…`) and Razorpay ingest (`/api/rzp…`).
+
 | Method | Path | What it does |
 |--------|------|--------------|
-| POST | `/api/auth/login` | Authenticate; returns JWT + role |
+| POST | `/api/auth/login` | Authenticate; returns a token |
+| GET | `/api/auth/me`, `/api/auth/roles` | Current identity / available roles |
+| GET | `/api/health` | Liveness probe (used by Docker HEALTHCHECK) |
+| GET | `/api/system` | Storage backend, cache backend, verification mode, counts |
 | GET | `/api/summary` | Model summary + decision metrics |
 | GET | `/api/events?risk=&limit=` | Recent payments with scores & decisions |
 | GET | `/api/events/{event_id}` | Full investigation report for one event |
 | POST | `/api/investigate` | Score a live payment (approve / review / block + evidence) |
 | GET | `/api/vectors` | Fraud-vector distribution |
 | GET | `/api/test-metrics` | Honest held-out precision / recall / F1 + cost |
-| POST | `/api/feedback/{id}/correct` | Mark clean / fraud (continual learning) |
+| GET | `/api/demo/clean`, `/api/demo/fraud` | One-click demo payments |
+| POST | `/api/verify/event` | Start phone / SMS / WhatsApp OTP verification |
+| GET | `/api/verification`, `/api/verification/{id}` | List / fetch OTP verification sessions |
+| POST | `/api/verification/{id}/confirm` | Confirm the correct OTP → approve |
+| POST | `/api/verification/{id}/deny` | Reject → record a failed attempt |
+| POST | `/api/verification/{id}/resend` | Resend the OTP |
+| GET | `/api/review?status=`, `/api/review/stats` | Human review queue + stats (admin) |
+| POST | `/api/review/{review_id}/resolve` | Approve / block a queued item (feeds learning) |
+| GET | `/api/feedback` | Recorded feedback / labels |
+| POST | `/api/feedback/{event_id}/correct` | Mark clean / fraud (continual learning) |
 | POST | `/api/learning/retrain` | Retrain on confirmed feedback |
-| GET | `/api/users` | Live-investigated users in the database |
-| GET | `/api/users/search?q=` | Search users by phone / ID / name / merchant |
-| DELETE | `/api/users/{user_id}` | Delete user + their events (admin only) |
+| GET | `/api/users`, `/api/users/stats`, `/api/users/search?q=` | Investigated users |
+| GET, DELETE | `/api/users/{user_id}` | Fetch / delete a user + their events (admin) |
+| GET, POST | `/api/queries` | List / raise customer-care queries |
+| GET | `/api/queries/stats`, PATCH `/api/queries/{id}` | Query stats / update |
 | POST | `/api/rag/ask` | SENbot Q&A (runbook + live dataset) |
-| GET | `/api/rag/status` | SENbot + pipeline source counts |
-| POST | `/api/verification/{event_id}` | Start phone / SMS / WhatsApp OTP verification |
-| POST | `/api/verification/{event_id}/public` | OTP verification for the review band demo |
+| GET | `/api/rag/status`, `/api/rag/knowledge` | SENbot status / runbook |
+| POST | `/api/rzp/create-order`, `/api/rzp/webhook` | Razorpay order / ingest |
+| GET | `/api/rzp/status`, `/api/rzp/demo-payment` | Razorpay status / demo |
+
+> Interactive, always-current reference: **`/docs`** (Swagger) and **`/redoc`** at
+> runtime, or the generated [docs/API.md](docs/API.md) / [docs/openapi.json](docs/openapi.json).
+
+---
+
+## Testing & performance
+
+```bash
+cd backend
+python -m pytest                       # unit + API integration tests
+python load_test.py --n 300 --concurrency 8   # latency/throughput -> docs/PERFORMANCE.md
+python export_openapi.py               # regenerate docs/openapi.json + docs/API.md
+```
+
+The suite uses a throwaway SQLite DB and an in-memory cache, so it needs no
+servers. Live scoring is single-pass per request (scoped feature build) —
+see [docs/PERFORMANCE.md](docs/PERFORMANCE.md) for p50/p95 numbers.
 
 ---
 

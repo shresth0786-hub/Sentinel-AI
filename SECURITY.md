@@ -69,10 +69,13 @@ Never store secrets in the Dockerfile, `docker-compose.yml`, or git.
 ## 6. Container hardening (already applied in `Dockerfile` / `docker-compose.yml`)
 
 - **Non-root user** — container runs as `appuser` (uid 10001), no root shell.
-- **Read-only root filesystem** — only the two runtime-data volumes are writable.
+- **Read-only root filesystem** — only the runtime-data volumes are writable.
 - **Drop capabilities** — `cap_drop: [ALL]`, `no-new-privileges: true`.
 - **Minimal base image** — `python:3.13-slim`, no debug toolchain.
 - **Healthcheck** — `/api/health` gates restart/liveness decisions.
+- **Backing services** — `docker compose` runs PostgreSQL and Redis on the
+  internal network only (not published to the host); the app waits for both via
+  `depends_on: service_healthy`.
 - **Supply-chain** — for hardened deployments pin base images by **SHA-256
   digest**, run dependency vulnerability scanning (e.g. `trivy`, `grype`,
   `pip-audit`, `npm audit`), and sign/tag images with provenance metadata.
@@ -80,9 +83,16 @@ Never store secrets in the Dockerfile, `docker-compose.yml`, or git.
 ## 7. Data flow & persistence
 
 - Model artifacts are static and read-only (approved model version).
-- All runtime writes go to named volumes today (`sentinel_data`,
-  `sentinel_db`). For company use, replace these volumes with a managed DB +
-  object storage and move OTP sessions to Redis with a TTL.
+- Runtime state is **not** in the image: durable records (users, queries,
+  feedback, verification audit, transactions, review queue) live in
+  **PostgreSQL** (`DATABASE_URL`) and short-lived OTP sessions live in **Redis**
+  (`REDIS_URL`, TTL-bounded) — both provided by `docker-compose.yml`.
+- Without a configured DB/Redis the app degrades to a local SQLite file and an
+  in-process session store (fine for the demo; not for production scale).
+- Named volumes (`sentinel_data`, `sentinel_db`, `pgdata`, `redis_data`) keep
+  state across restarts. For company use, point `DATABASE_URL` at a managed
+  PostgreSQL instance and `REDIS_URL` at a managed Redis (TLS + auth) and use
+  object storage for any uploaded datasets.
 
 ## 8. Reporting a vulnerability
 

@@ -75,17 +75,34 @@ Press **Enter** in the terminal to stop both servers.
 
 ---
 
-## 3) Docker (single container)
+## 3) Docker (hardened stack: app + PostgreSQL + Redis)
 
-Build and run in one step — no local Node or Python setup needed:
+Build and run the full stack in one step — no local Node or Python setup needed:
+
+```bash
+export SENTINEL_AUTH_SECRET="$(openssl rand -hex 32)"
+export SENTINEL_ADMIN_PASSWORD='a-strong-admin-password'
+export POSTGRES_PASSWORD='a-strong-db-password'
+docker compose up --build -d      # app + PostgreSQL + Redis
+docker compose down              # stop (data kept in volumes)
+```
+
+The app persists users, queries, feedback, verifications, transactions and the
+review queue in **PostgreSQL**, and keeps OTP sessions in **Redis**. Both run on
+the internal network only.
+
+Open **http://localhost:8100** — the built React dashboard and the FastAPI API
+are both served from the same container.
+
+> `docker compose` requires `SENTINEL_AUTH_SECRET`, `SENTINEL_ADMIN_PASSWORD` and
+> `POSTGRES_PASSWORD`; without them it refuses to start (no secrets are hardcoded).
+
+For a single container only (SQLite + in-memory, no Postgres/Redis):
 
 ```bash
 docker build -t sentinel-ai .
 docker run -p 8100:8100 sentinel-ai
 ```
-
-Open **http://localhost:8100** — the built React dashboard and the FastAPI API
-are both served from the same container.
 
 > The first build takes a few minutes (installs deps, builds frontend with Vite,
 > trains the model). Subsequent builds are fast thanks to layer caching.
