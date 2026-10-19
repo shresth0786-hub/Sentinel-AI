@@ -21,3 +21,7 @@ httpx>=0.27            # FastAPI TestClient transport
 # OPTIONAL: only needed to place REAL phone-call payment confirmations (Twilio).
 # The demo runs fully offline in SIMULATED mode without this dependency.
 twilio>=9.0
+
+# OPTIONAL: only needed for the REAL Razorpay test-mode integration (create test
+# orders / ingest webhooks). The app imports it defensively.
+razorpay>=2.0

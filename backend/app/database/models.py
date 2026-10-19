@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import time
 
-from sqlalchemy import JSON, Float, Integer, String, Text
+from sqlalchemy import JSON, Boolean, Float, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database.db import Base
@@ -30,7 +30,7 @@ class User(Base):
     payment_method: Mapped[str | None] = mapped_column(String(32), nullable=True)
     amount_inr: Mapped[float | None] = mapped_column(Float, nullable=True)
     attempt_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    is_new_device: Mapped[bool | None] = mapped_column(Integer, nullable=True)
+    is_new_device: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     status: Mapped[str | None] = mapped_column(String(32), nullable=True)
     decision: Mapped[str | None] = mapped_column(String(16), nullable=True)
     fraud_vector: Mapped[str | None] = mapped_column(String(64), nullable=True)
@@ -104,7 +104,7 @@ class FeedbackRecord(Base):
     created_at: Mapped[float] = mapped_column(Float, default=time.time)
     label: Mapped[int | None] = mapped_column(Integer, nullable=True)
     label_source: Mapped[str | None] = mapped_column(String(32), nullable=True)
-    corrected: Mapped[bool] = mapped_column(Integer, default=0)
+    corrected: Mapped[bool] = mapped_column(Boolean, default=False)
     labelled_at: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     def to_dict(self) -> dict:
@@ -146,7 +146,7 @@ class VerificationRecord(Base):
     delivered: Mapped[str | None] = mapped_column(String(64), nullable=True)
     delivery_sid: Mapped[str | None] = mapped_column(String(128), nullable=True)
     message: Mapped[str | None] = mapped_column(String(32), nullable=True)
-    recording_available: Mapped[bool] = mapped_column(Integer, default=0)
+    recording_available: Mapped[bool] = mapped_column(Boolean, default=False)
     call_script: Mapped[list | None] = mapped_column(JSON, nullable=True)
 
     def to_dict(self) -> dict:

@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from sqlalchemy import Boolean
+
 from app.database import get_user_db, get_query_db, db_backend
+from app.database import models
 from app.database.events import get_transaction_store
 from app.database.review import get_review_queue
 from app.feedback import FeedbackStore
@@ -151,12 +154,23 @@ def test_verification_audit_roundtrip():
     a = verification_audit()
     a.save({"verification_id": "ver_x", "event_id": "ev", "status": "pending",
             "channel": "call", "amount_inr": 500, "call_script": ["hi"],
+            "recording_available": False,
             "otp": "SECRET-SHOULD-NOT-PERSIST"})
     rec = a.get("ver_x")
     assert rec["status"] == "pending"
     assert rec["amount_inr"] == 500
+    assert rec["recording_available"] is False
     # the raw OTP must never be stored in the audit table
     assert "otp" not in rec
+
+
+def test_boolean_columns_are_boolean_type():
+    """Guard against mapping Python-bool fields to Integer: on PostgreSQL that
+    raises 'column is of type integer but expression is of type boolean'."""
+    assert isinstance(models.User.__table__.c.is_new_device.type, Boolean)
+    assert isinstance(models.FeedbackRecord.__table__.c.corrected.type, Boolean)
+    assert isinstance(models.VerificationRecord.__table__.c.recording_available.type,
+                      Boolean)
 
 
 def test_db_backend_reports_sqlite():

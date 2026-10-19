@@ -97,8 +97,8 @@ class PhoneVerifier:
         self._cache.set(ver["verification_id"], ver, ttl=self.otp_ttl + _CACHE_TTL_GRACE)
         try:
             self._audit.save(ver)
-        except Exception:  # pragma: no cover - audit must not break the call
-            pass
+        except Exception as exc:  # audit must not break the live call, but log it
+            print(f"[verification] audit persist failed: {exc}")
 
     def _load(self, vid: str) -> dict | None:
         """Live session from cache, else the durable audit row."""

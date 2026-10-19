@@ -25,7 +25,10 @@ from __future__ import annotations
 
 import os
 
-import razorpay
+try:  # optional dependency: the app must run without the Razorpay SDK
+    import razorpay
+except ImportError:  # pragma: no cover - exercised only when the SDK is absent
+    razorpay = None  # type: ignore[assignment]
 
 from app.data_generator import FRAUD_VECTORS
 
@@ -50,7 +53,12 @@ def is_configured() -> bool:
     return bool(os.getenv("RAZORPAY_KEY_ID") and os.getenv("RAZORPAY_KEY_SECRET"))
 
 
-def client() -> razorpay.Client:
+def client() -> "razorpay.Client":
+    if razorpay is None:
+        raise RuntimeError(
+            "The `razorpay` SDK is not installed. Install it with "
+            "`pip install razorpay` to use the live test-mode integration."
+        )
     key = os.getenv("RAZORPAY_KEY_ID")
     secret = os.getenv("RAZORPAY_KEY_SECRET")
     return razorpay.Client(auth=(key, secret))
