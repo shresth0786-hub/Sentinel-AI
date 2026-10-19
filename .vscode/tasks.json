@@ -2,11 +2,60 @@
   "version": "2.0.0",
   "tasks": [
     {
-      "label": "backend: run",
+      "label": "execute: backend (API :8100)",
       "type": "shell",
       "command": "C:\\Python313\\python.exe",
-      "args": ["-m", "uvicorn", "app.main:app", "--reload", "--port", "8100"],
+      "args": ["-m", "uvicorn", "app.main:app", "--port", "8100"],
       "options": { "cwd": "${workspaceFolder}/backend" },
+      "presentation": { "panel": "dedicated", "group": "execute", "reveal": "always" },
+      "problemMatcher": []
+    },
+    {
+      "label": "execute: frontend (UI :5173)",
+      "type": "shell",
+      "command": "npm.cmd",
+      "args": ["run", "dev"],
+      "options": { "cwd": "${workspaceFolder}/frontend/app" },
+      "presentation": { "panel": "dedicated", "group": "execute", "reveal": "always" },
+      "problemMatcher": []
+    },
+    {
+      "label": "execute: open app in browser",
+      "type": "shell",
+      "command": "powershell",
+      "args": [
+        "-NoProfile",
+        "-Command",
+        "Start-Sleep -Seconds 8; Start-Process 'http://localhost:5173'"
+      ],
+      "presentation": { "panel": "dedicated", "group": "execute", "reveal": "always" },
+      "problemMatcher": []
+    },
+    {
+      "label": "execute",
+      "dependsOn": [
+        "execute: backend (API :8100)",
+        "execute: frontend (UI :5173)",
+        "execute: open app in browser"
+      ],
+      "dependsOrder": "parallel",
+      "group": { "kind": "build", "isDefault": true },
+      "presentation": { "panel": "shared", "group": "execute" },
+      "problemMatcher": []
+    },
+    {
+      "label": "execute (docker full stack)",
+      "type": "shell",
+      "command": "docker compose up --build -d; Start-Sleep -Seconds 15; Start-Process 'http://localhost:8100'",
+      "options": { "cwd": "${workspaceFolder}" },
+      "presentation": { "panel": "dedicated", "group": "execute", "reveal": "always" },
+      "problemMatcher": []
+    },
+    {
+      "label": "stop (docker full stack)",
+      "type": "shell",
+      "command": "docker compose down",
+      "options": { "cwd": "${workspaceFolder}" },
       "problemMatcher": []
     },
     {
@@ -15,45 +64,6 @@
       "command": "C:\\Python313\\python.exe",
       "args": ["-m", "pytest"],
       "options": { "cwd": "${workspaceFolder}/backend" },
-      "group": { "kind": "test", "isDefault": true },
-      "problemMatcher": []
-    },
-    {
-      "label": "frontend: dev",
-      "type": "shell",
-      "command": "npm.cmd",
-      "args": ["run", "dev"],
-      "options": { "cwd": "${workspaceFolder}/frontend/app" },
-      "problemMatcher": []
-    },
-    {
-      "label": "frontend: build",
-      "type": "shell",
-      "command": "npm.cmd",
-      "args": ["run", "build"],
-      "options": { "cwd": "${workspaceFolder}/frontend/app" },
-      "problemMatcher": []
-    },
-    {
-      "label": "frontend: lint",
-      "type": "shell",
-      "command": "npm.cmd",
-      "args": ["run", "lint"],
-      "options": { "cwd": "${workspaceFolder}/frontend/app" },
-      "problemMatcher": []
-    },
-    {
-      "label": "docker: up (full stack)",
-      "type": "shell",
-      "command": "docker compose up --build -d",
-      "options": { "cwd": "${workspaceFolder}" },
-      "problemMatcher": []
-    },
-    {
-      "label": "docker: down",
-      "type": "shell",
-      "command": "docker compose down",
-      "options": { "cwd": "${workspaceFolder}" },
       "problemMatcher": []
     }
   ]

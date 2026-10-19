@@ -1,0 +1,70 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "execute: backend (API :8100)",
+      "type": "shell",
+      "command": "C:\\Python313\\python.exe",
+      "args": ["-m", "uvicorn", "app.main:app", "--port", "8100"],
+      "options": { "cwd": "${workspaceFolder}/backend" },
+      "presentation": { "panel": "dedicated", "group": "execute", "reveal": "always" },
+      "problemMatcher": []
+    },
+    {
+      "label": "execute: frontend (UI :5173)",
+      "type": "shell",
+      "command": "npm.cmd",
+      "args": ["run", "dev"],
+      "options": { "cwd": "${workspaceFolder}/frontend/app" },
+      "presentation": { "panel": "dedicated", "group": "execute", "reveal": "always" },
+      "problemMatcher": []
+    },
+    {
+      "label": "execute: open app in browser",
+      "type": "shell",
+      "command": "powershell",
+      "args": [
+        "-NoProfile",
+        "-Command",
+        "Start-Sleep -Seconds 8; Start-Process 'http://localhost:5173'"
+      ],
+      "presentation": { "panel": "dedicated", "group": "execute", "reveal": "always" },
+      "problemMatcher": []
+    },
+    {
+      "label": "execute",
+      "dependsOn": [
+        "execute: backend (API :8100)",
+        "execute: frontend (UI :5173)",
+        "execute: open app in browser"
+      ],
+      "dependsOrder": "parallel",
+      "group": { "kind": "build", "isDefault": true },
+      "presentation": { "panel": "shared", "group": "execute" },
+      "problemMatcher": []
+    },
+    {
+      "label": "execute (docker full stack)",
+      "type": "shell",
+      "command": "docker compose up --build -d; Start-Sleep -Seconds 15; Start-Process 'http://localhost:8100'",
+      "options": { "cwd": "${workspaceFolder}" },
+      "presentation": { "panel": "dedicated", "group": "execute", "reveal": "always" },
+      "problemMatcher": []
+    },
+    {
+      "label": "stop (docker full stack)",
+      "type": "shell",
+      "command": "docker compose down",
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": []
+    },
+    {
+      "label": "tests: pytest",
+      "type": "shell",
+      "command": "C:\\Python313\\python.exe",
+      "args": ["-m", "pytest"],
+      "options": { "cwd": "${workspaceFolder}/backend" },
+      "problemMatcher": []
+    }
+  ]
+}
