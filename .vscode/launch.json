@@ -1,0 +1,55 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Backend: FastAPI (uvicorn)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": ["app.main:app", "--reload", "--port", "8100"],
+      "cwd": "${workspaceFolder}/backend",
+      "python": "C:\\Python313\\python.exe",
+      "env": {
+        "SENTINEL_ADMIN_PASSWORD": "SentinelAdmin!2026",
+        "PYTHONIOENCODING": "utf-8"
+      },
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      "name": "Backend: current pytest file",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "args": ["${file}", "-vv"],
+      "cwd": "${workspaceFolder}/backend",
+      "python": "C:\\Python313\\python.exe",
+      "env": {
+        "SENTINEL_ADMIN_PASSWORD": "testpass",
+        "PYTHONIOENCODING": "utf-8"
+      },
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      "name": "Frontend: Vite dev server",
+      "type": "node",
+      "request": "launch",
+      "runtimeExecutable": "npm.cmd",
+      "runtimeArgs": ["run", "dev"],
+      "cwd": "${workspaceFolder}/frontend/app",
+      "console": "integratedTerminal",
+      "skipFiles": ["<node_internals>/**"]
+    }
+  ],
+  "compounds": [
+    {
+      "name": "Full stack (backend + frontend)",
+      "configurations": [
+        "Backend: FastAPI (uvicorn)",
+        "Frontend: Vite dev server"
+      ],
+      "stopAll": true
+    }
+  ]
+}
