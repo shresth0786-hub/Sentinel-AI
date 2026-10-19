@@ -65,6 +65,7 @@ export const api = {
   demoBorderline: (phone, channel) => ({
     event: {
       user_id: 'usr_rev_demo',
+      payer_name: 'Rohan Verma',
       device_id: 'dev_new_demo',
       card_last4: '4411',
       amount_inr: 6000,

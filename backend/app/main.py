@@ -28,7 +28,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
-from pydantic import BaseModel, Field
+from pydantic import AliasChoices, BaseModel, Field
 
 from app.pipeline import FraudDetector
 from app import razorpay_client
@@ -97,6 +97,12 @@ class PaymentEvent(BaseModel):
     three_ds_passed: bool = True
     status: str = "captured"
     phone: str = ""
+    payer_name: str = Field(
+        "",
+        validation_alias=AliasChoices("payer_name", "customer_name", "name"),
+        description="payer's display name (optional; persisted to the user "
+                    "database). Accepts payer_name / customer_name / name.",
+    )
     channel: str = Field("call", description="OTP delivery channel for the review "
                          "band: call | sms | whatsapp (used with Twilio)")
 
@@ -302,8 +308,8 @@ def investigate(req: InvestigateRequest):
         get_user_db().upsert_user(
             str(evt.get("user_id") or ""), evt, outcome=res,
         )
-    except Exception:  # pragma: no cover - DB must never break scoring
-        pass
+    except Exception as exc:  # DB must never break scoring, but log it
+        print(f"[investigate] user persist failed: {exc}")
     return res
 
 

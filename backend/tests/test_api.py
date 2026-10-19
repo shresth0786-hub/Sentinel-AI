@@ -5,6 +5,7 @@ from __future__ import annotations
 from app.verification import verifier
 from app.database.review import get_review_queue
 from app.database.events import get_transaction_store
+from app.database import get_user_db
 
 
 # ------------------------------------------------------------------ basics
@@ -118,3 +119,21 @@ def test_real_investigation_persists_transaction(client, detector):
     if res["decision"] == "review":
         assert any(x["event_id"] == res["event_id"]
                    for x in get_review_queue().all())
+
+
+def test_investigate_accepts_and_persists_payer_name(client):
+    """A supplied payer name must survive the request schema and reach the user
+    database (regression: the API used to drop it before persistence)."""
+    payload = {"event": {"user_id": "name_user", "amount_inr": 900,
+                         "merchant": "Name Store", "payer_name": "Asha Rao",
+                         "device_id": "dev_name", "card_last4": "1111"}}
+    assert client.post("/api/investigate", json=payload).status_code == 200
+    rec = get_user_db().get("name_user")
+    assert rec is not None
+    assert rec["name"] == "Asha Rao"
+    # the `customer_name` alias is accepted too
+    payload["event"]["user_id"] = "name_user2"
+    payload["event"].pop("payer_name")
+    payload["event"]["customer_name"] = "Ravi Kumar"
+    assert client.post("/api/investigate", json=payload).status_code == 200
+    assert get_user_db().get("name_user2")["name"] == "Ravi Kumar"

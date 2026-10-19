@@ -1932,6 +1932,12 @@
             "title": "Phone",
             "default": ""
           },
+          "payer_name": {
+            "type": "string",
+            "title": "Payer Name",
+            "description": "payer's display name (optional; persisted to the user database). Accepts payer_name / customer_name / name.",
+            "default": ""
+          },
           "channel": {
             "type": "string",
             "title": "Channel",

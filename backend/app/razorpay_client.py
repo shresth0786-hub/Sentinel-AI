@@ -99,6 +99,8 @@ def webhook_event_to_payload(webhook: dict) -> dict:
 
     return {
         "user_id": payment.get("email") or payment.get("contact") or "rzp_user",
+        "payer_name": (notes.get("payer_name") or notes.get("customer_name")
+                       or notes.get("name") or payment.get("name") or ""),
         "device_id": f"rzp:{payment.get('id', 'device')}",
         "card_last4": last4,
         "amount_inr": (payment.get("amount") or 0) / 100.0,
@@ -122,6 +124,7 @@ def _card_test_hit(i: int) -> dict:
     """A single low-value card-testing attempt from the same bot device."""
     return {
         "user_id": "usr_demo_mallory",
+        "payer_name": "Arjun Nair",
         "device_id": "dev_demo_bot_0042",
         "card_last4": "4242",
         "amount_inr": round(1.5 + i, 2),       # micro-amount probing
@@ -156,6 +159,7 @@ def demo_clean_payment() -> dict:
     """A benign, established customer — should be approved."""
     return {
         "user_id": "usr_bona00333",
+        "payer_name": "Priya Sharma",
         "device_id": "dev_clean_0033",
         "card_last4": "8123",
         "amount_inr": 640.0,
