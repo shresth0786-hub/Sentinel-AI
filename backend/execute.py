@@ -10,13 +10,16 @@ other helper file (no VS Code tasks, no PowerShell script, no .env editing):
     python execute.py --stop         # stop a running Docker stack
 
 Docker mode  -> starts the hardened 3-service stack, waits until the API is
-                healthy, opens the dashboard, and tears the containers down
-                on Ctrl+C (volumes are kept, so your data survives).
+                healthy, opens the dashboard, and leaves the stack running
+                when you close it (stop it with `--stop`).
 Local mode   -> starts the FastAPI backend and the Vite dev server as child
                 processes, opens the dashboard, and stops both on Ctrl+C.
 
 Only the Python standard library is used, so this runs on any machine that
 already has Python — nothing to pip install.
+
+This file lives in backend/ with the rest of the code; it locates the
+project root automatically, so it works from anywhere.
 """
 
 from __future__ import annotations
@@ -32,8 +35,18 @@ import urllib.request
 import webbrowser
 from pathlib import Path
 
-# --------------------------------------------------------------------------- config
-ROOT = Path(__file__).resolve().parent
+
+# --------------------------------------------------------------------------- paths
+def _find_project_root(start: Path) -> Path:
+    """Walk up from this file until the folder that holds the project is found."""
+    for candidate in [start, *start.parents]:
+        if (candidate / "docker-compose.yml").is_file() and (candidate / "backend").is_dir():
+            return candidate
+    return start.parent
+
+
+_HERE = Path(__file__).resolve().parent
+ROOT = _find_project_root(_HERE)
 BACKEND_DIR = ROOT / "backend"
 FRONTEND_DIR = ROOT / "frontend" / "app"
 COMPOSE_FILE = ROOT / "docker-compose.yml"

@@ -9,12 +9,12 @@
 ### Option 0 — One file, one command (simplest)
 
 ```powershell
-cd "C:\Users\SHRESTH\OneDrive\Desktop\razorpay-fraud-detector"
+cd "C:\Users\SHRESTH\OneDrive\Desktop\razorpay-fraud-detector\backend"
 C:\Python313\python.exe execute.py
 ```
 
-`execute.py` is a single self-contained launcher (standard library only — nothing to
-install). It:
+`backend/execute.py` is a single self-contained launcher (standard library only —
+nothing to install). It:
 
 1. starts Docker Desktop if it is not already running,
 2. brings up the **app + PostgreSQL + Redis** stack,
@@ -177,7 +177,7 @@ transactions, review_queue**. SQLite by default; **PostgreSQL** in Docker (via
 | `backend/app/cache.py` | Redis / in-memory session store |
 | `backend/train.py` | Trains the models and writes artifacts |
 | `frontend/app/src/App.jsx` | The dashboard UI |
-| `execute.py` | **One-file launcher** — starts everything and opens the app |
+| `backend/execute.py` | **One-file launcher** — starts everything and opens the app |
 | `execute.json` / `.vscode/tasks.json` | One-shot "run everything" task (VS Code) |
 | `docker-compose.yml` | App + PostgreSQL + Redis in one command |
 
