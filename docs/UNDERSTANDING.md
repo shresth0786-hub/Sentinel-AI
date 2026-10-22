@@ -178,6 +178,7 @@ transactions, review_queue**. SQLite by default; **PostgreSQL** in Docker (via
 | `backend/train.py` | Trains the models and writes artifacts |
 | `frontend/app/src/App.jsx` | The dashboard UI |
 | `backend/execute.py` | **One-file launcher** — starts everything and opens the app |
+| `execute.py` (root) and `Setup and command/execute.py` | Thin shortcuts that run `backend/execute.py` |
 | `execute.json` / `.vscode/tasks.json` | One-shot "run everything" task (VS Code) |
 | `docker-compose.yml` | App + PostgreSQL + Redis in one command |
 
