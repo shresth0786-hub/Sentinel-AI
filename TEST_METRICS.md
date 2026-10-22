@@ -15,7 +15,7 @@ payments; it cannot generate or execute fraud).
 ## Methodology
 
 - **Train / test split:** 80 / 20 random split seeded to 42.
-  - Train: 5,640 events · Test: 1,380 events (185 fraud, 1,195 legitimate).
+  - Train: 5,520 events · Test: 1,380 events (184 fraud, 1,196 legitimate).
 - **No leakage:** the ensemble (AI Investigator) is **fit only on the training
   split**. All metrics below are computed only on the held-out test split.
   Feature engineering uses trailing-window counts computed from **past events
@@ -48,28 +48,29 @@ payments; it cannot generate or execute fraud).
 | Metric | Value |
 |--------|-------|
 | **Precision** | **1.000** |
-| **Recall (fraud blocked)** | **0.984** (182 / 185) |
-| **F1** | **0.992** |
-| Recall incl. review | 0.989 (183 / 185) |
+| **Recall (fraud blocked)** | **0.978** (180 / 184) |
+| **F1** | **0.989** |
+| Recall incl. review | 0.978 (180 / 184) |
 | False positives (legit blocked) | **0** |
-| False negatives (fraud approved) | 3 |
-| Investigator AUC | 1.000 |
+| False negatives (fraud approved) | 4 |
+| Investigator AUC | 0.998 |
 
 ### Cost outcome
 
 | Item | Value |
 |------|-------|
 | False-positive cost | **₹0.00** (no legit payments wrongly blocked) |
-| False-negative cost | ₹8,466.14 |
-| **Total cost** | **₹8,466.14** |
-| No-intervention baseline | ₹313,247.14 |
-| **Money prevented** | **₹304,781.00** |
+| False-negative cost | ₹22,175.83 |
+| **Total cost** | **₹22,175.83** |
+| No-intervention baseline | ₹1,020,088.37 |
+| **Money prevented** | **₹997,912.53** |
 
-On the held-out test set the detector blocks 182 of 185 fraudulent payments
-with **zero false positives**, preventing ~₹3.05 lakh in fraud losses versus a
+On the held-out test set the detector blocks 180 of 184 fraudulent payments
+with **zero false positives**, preventing ~₹9.98 lakh in fraud losses versus a
 no-intervention baseline, at effectively zero cost to legitimate customers. The
-remaining 3 fraud events were flagged `review` (never `approve`) and would have
-been intercepted by the OTP payment-confirmation step rather than released.
+remaining 4 fraud events were approved (false negatives) — a 2.2% miss rate.
+Each missed payment is still surfaced in the dashboard for review and can be
+labelled via feedback to improve the next model.
 
 ---
 

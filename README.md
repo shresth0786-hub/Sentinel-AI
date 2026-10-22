@@ -130,17 +130,17 @@ Measured on a **held-out split** the ensemble never trained on — no leakage.
 | Metric | Value |
 |--------|-------|
 | **Precision** | **1.000** |
-| **Recall (fraud blocked)** | **0.984** (182 / 185) |
-| **F1** | **0.992** |
+| **Recall (fraud blocked)** | **0.978** (180 / 184) |
+| **F1** | **0.989** |
 | False positives (legit blocked) | **0** |
-| False negatives (fraud approved) | 3 |
-| Investigator AUC | 1.000 |
+| False negatives (fraud approved) | 4 |
+| Investigator AUC | 0.998 |
 
-**Cost outcome:** false-positive cost **Rs.0**, false-negative cost **Rs.8,466**,
-**total Rs.8,466** vs. a no-intervention baseline of **Rs.3,13,247** =
-**Rs.3,04,781 of money prevented**. All 3 "false negatives" landed in the
-`review` (OTP confirmation) band, so they were caught by human confirmation
-rather than released.
+**Cost outcome:** false-positive cost **Rs.0**, false-negative cost **Rs.22,176**,
+**total Rs.22,176** vs. a no-intervention baseline of **Rs.10,20,088** =
+**Rs.9,97,913 of money prevented**. The 4 "false negatives" were approved
+payments; each stays visible in the dashboard for review and can be labelled via
+feedback to improve the next model.
 
 ---
 

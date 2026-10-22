@@ -75,8 +75,8 @@ KNOWLEDGE = [
         ],
         "description": "A fraudulent payment was approved (leaked)",
         "diagnosis": (
-            "On the held-out set recall is 0.973 with 5 false negatives (all "
-            "review-band, never approved outright). A live false negative usually "
+            "On the held-out set recall is 0.978 with 4 false negatives (approved, "
+            "not blocked). A live false negative usually "
             "means the fraud looked indistinguishable from clean at the feature "
             "level, OR the fraudster used a brand-new identity/device/card with no "
             "history so velocity/graph signals were low. Check the event's "
@@ -375,11 +375,11 @@ KNOWLEDGE = [
         "description": "Interpreting the held-out test metrics",
         "diagnosis": (
             "Held-out test (seed 42): Precision 1.000 (0 false positives), Recall "
-            "0.973 (180/185 fraud blocked), F1 0.986, Investigator AUC 0.998. Cost: "
-            "false-positive cost Rs 0.00, false-negative cost Rs 8,466.14, total "
-            "Rs 8,466.14 vs a no-intervention baseline of Rs 313,247.14, i.e. about "
-            "Rs 304,781 in fraud prevented. The 5 unreal 'misses' were review-band "
-            "and would be caught by phone verification, not released."
+            "0.978 (180/184 fraud blocked), F1 0.989, Investigator AUC 0.998. Cost: "
+            "false-positive cost Rs 0.00, false-negative cost Rs 22,175.83, total "
+            "Rs 22,175.83 vs a no-intervention baseline of Rs 1,020,088.37, i.e. "
+            "about Rs 9,97,913 in fraud prevented. The 4 misses were approved "
+            "(false negatives); label them via feedback to improve future scores."
         ),
         "remedy": (
             "These are read live from GET /api/test-metrics. A rising false-positive "

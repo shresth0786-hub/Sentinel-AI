@@ -201,9 +201,9 @@ the returned token as `Authorization: Bearer <token>`.
 
 - **46 tests pass**: `cd backend; C:\Python313\python.exe -m pytest`
 - **Precision 1.000** (zero false positives — a legitimate customer is never wrongly
-  blocked), **Recall 0.984** (182 / 185 fraud blocked), **F1 0.992**, **AUC 1.000**.
-  The 3 misses were flagged `review`, never `approve`.
-- **About Rs 304,781** of fraud prevented versus doing nothing.
+  blocked), **Recall 0.978** (180 / 184 fraud blocked), **F1 0.989**, **AUC 0.998**.
+  The 4 misses were approved (false negatives) and remain visible for review.
+- **About Rs 997,913** of fraud prevented versus doing nothing.
 - Full write-up: `TEST_METRICS.md`.
 
 ---
