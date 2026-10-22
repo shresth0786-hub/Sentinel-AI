@@ -6,6 +6,32 @@
 
 ## Part 1 — Run the code (step by step)
 
+### Option 0 — One file, one command (simplest)
+
+```powershell
+cd "C:\Users\SHRESTH\OneDrive\Desktop\razorpay-fraud-detector"
+C:\Python313\python.exe execute.py
+```
+
+`execute.py` is a single self-contained launcher (standard library only — nothing to
+install). It:
+
+1. starts Docker Desktop if it is not already running,
+2. brings up the **app + PostgreSQL + Redis** stack,
+3. waits until the API is healthy,
+4. opens the dashboard in your browser (<http://localhost:8100>).
+
+Useful flags:
+
+| Command | What it does |
+|---------|--------------|
+| `python execute.py` | Auto: Docker stack if available, otherwise local dev servers |
+| `python execute.py --mode docker` | Force the full Docker stack |
+| `python execute.py --mode local` | Force local dev (backend + Vite frontend) |
+| `python execute.py --no-browser` | Do not open the browser automatically |
+| `python execute.py --build` | Rebuild the Docker image before starting |
+| `python execute.py --stop` | Stop the Docker stack |
+
 ### Option A — Docker (recommended: full stack = app + PostgreSQL + Redis)
 
 ```powershell
@@ -151,8 +177,9 @@ transactions, review_queue**. SQLite by default; **PostgreSQL** in Docker (via
 | `backend/app/cache.py` | Redis / in-memory session store |
 | `backend/train.py` | Trains the models and writes artifacts |
 | `frontend/app/src/App.jsx` | The dashboard UI |
+| `execute.py` | **One-file launcher** — starts everything and opens the app |
+| `execute.json` / `.vscode/tasks.json` | One-shot "run everything" task (VS Code) |
 | `docker-compose.yml` | App + PostgreSQL + Redis in one command |
-| `execute.json` / `.vscode/tasks.json` | One-shot "run everything" task |
 
 ### Key API endpoints
 
